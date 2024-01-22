@@ -1,0 +1,8 @@
+typer
+markdown2
+commonmark 
+PyMuPDF
+pygments
+mathutils
+pillow
+numpy
