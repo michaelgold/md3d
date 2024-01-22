@@ -14,13 +14,11 @@ import fitz  # PyMuPDF
 import commonmark
 from pygments.formatters import HtmlFormatter
 from markdown.extensions.codehilite import CodeHiliteExtension
-from bpy.types import Sequence, Area
 import math
 from mathutils import Euler, Vector
 from urllib.parse import urlparse
 from PIL import Image
 import io
-import bmesh
 
 
 class InkscapeInstallerFactory:
@@ -406,7 +404,11 @@ def convert_to_svgs(md_sections, base_dir):
 
 
 def create_material(
-    name="Slides", roughness=0.9, alpha=0.630, base_color=(0.8, 0.8, 0.8, 1.0), transmission=0.0 
+    name="Slides",
+    roughness=0.9,
+    alpha=0.630,
+    base_color=(0.8, 0.8, 0.8, 1.0),
+    transmission=0.0,
 ):
     """Create a material for the slides."""
     bpy.data.materials.new(name=name)
@@ -571,7 +573,7 @@ def main(input_md: str):
     sun = bpy.context.active_object
     sun.data.energy = 2.6
     sun.name = "Sun"
-  
+
     for area in bpy.context.screen.areas:
         if area.type == "VIEW_3D":
             for space in area.spaces:
@@ -588,14 +590,12 @@ def main(input_md: str):
                     ).to_quaternion()
                     space.region_3d.view_location = Vector((0, -2, 3))
                     area.spaces[0].shading.type = "MATERIAL"
-                    print (f"setting shading to  {area.spaces[0].shading.type}")
-                    
+                    print(f"setting shading to  {area.spaces[0].shading.type}")
 
                     zoom_level = 2.0  # Example zoom level
 
                     # Set the zoom level
                     space.region_3d.view_distance = zoom_level
-
 
     save_blend_file(input_md_file.stem + ".blend")
 
