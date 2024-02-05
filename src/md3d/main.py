@@ -189,20 +189,42 @@ class CustomHtmlFormatter(HtmlFormatter):
 
 
 def download_images_from_markdown(md_content, base_dir):
-    image_links = []
-    lines = md_content.split("\n")
-    for line in lines:
-        if line.startswith("![") and "](" in line and line.endswith(")"):
-            link_start = line.find("](") + 2
-            link_end = line.find(")", link_start)
-            image_link = line[link_start:link_end]
-            image_links.append(image_link)
-            # remove the image link from the line
-            lines.remove(line)
+    slide_images = {}
+    image_links = {}
+    sections = md_content.split("---")
+    processed_md = ""
+
+    for i, section in enumerate(sections):
+        lines = section.split("\n")
+        print(f"section {i} {section}")
+        image_link = None
+
+        for line in lines:
+            print(f"section {i}: {line}")
+
+            if line.startswith("![") and "](" in line and line.endswith(")"):
+                link_start = line.find("](") + 2
+                link_end = line.find(")", link_start)
+                print(f"found image link: {line[link_start:link_end]}")
+                image_link = line[link_start:link_end]
+
+                # remove the image link from the line
+                lines.remove(line)
+        if image_link:
+            image_links[i] = image_link
+        else:
+            image_links[i] = None
+        processed_md += "\n".join(lines)
+        if i < len(sections) - 1:
+            processed_md += "---"
+
+        print(f"Image links: {image_links}")
 
     image_paths = []
-    for link in image_links:
-        if link.startswith("http"):
+    for i, link in enumerate(image_links.values()):
+        print(f"i {i}, {link}")
+        img_path = None
+        if link and link.startswith("http"):
             try:
                 response = requests.get(link)
                 if response.status_code == 200:
@@ -211,22 +233,25 @@ def download_images_from_markdown(md_content, base_dir):
                     img_path = base_dir / img_name
             except requests.exceptions as e:
                 raise (f"Error downloading image: {e}")
-        else:
+        elif link:
             try:
                 img_path = Path(link)
                 img_name = img_path.name
                 img_data = img_path.read_bytes()
             except FileNotFoundError as e:
                 raise (f"Error reading image: {e}")
-        with open(img_path, "wb") as f:
-            f.write(img_data)
-        image_paths.append(str(img_path))
+        if img_path:
+            with open(img_path, "wb") as f:
+                f.write(img_data)
+
+        slide_images[i] = str(img_path) if img_path else None
 
     print(f"Image paths: {image_paths}")
 
-    cleaned_md_content = "\n".join(lines)
+    cleaned_md_content = processed_md
+    print(f"Cleaned MD content: {cleaned_md_content}")
 
-    return image_paths, cleaned_md_content
+    return slide_images, cleaned_md_content
 
 
 # Function to import images into Blender and position them
@@ -268,61 +293,77 @@ def download_images_from_markdown(md_content, base_dir):
 #         plane.scale.x = img_aspect
 
 
-def import_and_position_images(
-    image_paths, offset_x=2.0, offset_y=-0.05, offset_z=2.8, text_plane_width=2
-):
-    for i, img_path in enumerate(image_paths):
-        # Load image
-        with Image.open(img_path) as img:
-            img_data = io.BytesIO()
-            img.save(img_data, format="PNG")
-            img_data.seek(0)
-
-        # Create image data block in Blender
-        img_name = os.path.basename(img_path)
-        blender_img = bpy.data.images.load(img_path, check_existing=True)
-        blender_img.pack()
-
-        # Create a new plane and assign the image as a texture
-        bpy.ops.mesh.primitive_plane_add(size=1, enter_editmode=False, align="WORLD")
-        plane = bpy.context.active_object
-        plane.rotation_euler[0] = 1.5708  # 90 degrees in radians
-
-        # Adjust plane size to match image aspect ratio
-        img_aspect = img.width / img.height
-        plane.scale.x = img_aspect
-
-        # Calculate X-coordinate for right alignment
-        # The center position of the text plane
-        text_plane_center_x = i * text_plane_width
-        # The right edge of the text plane
-        right_edge_text_plane = text_plane_center_x + (text_plane_width / 2)
-        # Position the image plane so its right edge aligns with the right edge of the text plane
-        plane.location.x = (
-            right_edge_text_plane - (plane.dimensions.x / 2) + i / plane.scale.x
+def move_to_collection(obj, collection_name):
+    # create the collection if it doesn't exist
+    if collection_name not in bpy.data.collections:
+        bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(
+            bpy.data.collections[collection_name]
         )
-        plane.location.y = offset_y
-        plane.location.z = offset_z
+    # move object to the collection
+    bpy.data.collections[collection_name].objects.link(obj)
+    # remove object from the default collection
+    bpy.data.collections["Collection"].objects.unlink(obj)
 
-        # Create material with image texture
-        mat = bpy.data.materials.new(name=img_name + "_Mat")
-        mat.use_nodes = True
-        bsdf = mat.node_tree.nodes["Principled BSDF"]
-        bsdf.inputs["Roughness"].default_value = 1.0
-        bsdf.inputs["Metallic"].default_value = 0.6
-        tex_image = mat.node_tree.nodes.new("ShaderNodeTexImage")
-        tex_image.image = blender_img
-        mat.node_tree.links.new(bsdf.inputs["Base Color"], tex_image.outputs["Color"])
-        plane.data.materials.append(mat)
 
-        # create the images collection if it doesn't exist
-        if "Images" not in bpy.data.collections:
-            bpy.data.collections.new("Images")
-            bpy.context.scene.collection.children.link(bpy.data.collections["Images"])
-        # move plane to the images collection
-        bpy.data.collections["Images"].objects.link(plane)
-        # name the plane image i
-        plane.name = f"Image {i}"
+def import_and_position_images(
+    slide_images, offset_x=2.0, offset_y=-0.05, offset_z=2.8, text_plane_width=2
+):
+    print(f"Importing images: {slide_images}")
+    print(f"processing {len(slide_images)} images")
+    for i, img_path in enumerate(slide_images.values()):
+        print(f"importing {i}, {img_path}")
+        # Load image
+        if img_path:
+            with Image.open(img_path) as img:
+                img_data = io.BytesIO()
+                img.save(img_data, format="PNG")
+                img_data.seek(0)
+
+            # Create image data block in Blender
+            img_name = os.path.basename(img_path)
+            blender_img = bpy.data.images.load(img_path, check_existing=True)
+            blender_img.pack()
+
+            # Create a new plane and assign the image as a texture
+            bpy.ops.mesh.primitive_plane_add(
+                size=1, enter_editmode=False, align="WORLD"
+            )
+            plane = bpy.context.active_object
+            plane.rotation_euler[0] = 1.5708  # 90 degrees in radians
+
+            # Adjust plane size to match image aspect ratio
+            img_aspect = img.width / img.height
+            plane.scale.x = img_aspect
+
+            # Calculate X-coordinate for right alignment
+            # The center position of the text plane
+            text_plane_center_x = i * text_plane_width
+            # The right edge of the text plane
+            right_edge_text_plane = text_plane_center_x + (text_plane_width / 2)
+            # Position the image plane so its right edge aligns with the right edge of the text plane
+            plane.location.x = (
+                right_edge_text_plane - (plane.dimensions.x / 2) + i / plane.scale.x
+            )
+            plane.location.y = offset_y
+            plane.location.z = offset_z
+
+            # Create material with image texture
+            mat = bpy.data.materials.new(name=img_name + "_Mat")
+            mat.use_nodes = True
+            bsdf = mat.node_tree.nodes["Principled BSDF"]
+            bsdf.inputs["Roughness"].default_value = 1.0
+            bsdf.inputs["Metallic"].default_value = 0.6
+            tex_image = mat.node_tree.nodes.new("ShaderNodeTexImage")
+            tex_image.image = blender_img
+            mat.node_tree.links.new(
+                bsdf.inputs["Base Color"], tex_image.outputs["Color"]
+            )
+            plane.data.materials.append(mat)
+
+            # create the images collection if it doesn't exist
+            move_to_collection(plane, "Images")
+            plane.name = f"Image {i}"
 
         # add a light
         bpy.ops.object.light_add(
@@ -333,6 +374,7 @@ def import_and_position_images(
         light.data.color = (1, 1, 1)
         light.rotation_euler[0] = 1.5708  # 90 degrees in radians
         light.location.x = i * (offset_x * 2) + 0.5
+        move_to_collection(light, "Lights")
 
 
 def markdown_to_html(md_text):
@@ -450,14 +492,14 @@ def import_and_transform_svgs(svg_files, offset_x=3):
         bpy.ops.import_curve.svg(filepath=svg_file)
         new_objects = []
 
-        print(f"Existing objects: {existing_objects}")
+        # print(f"Existing objects: {existing_objects}")
 
         for obj in bpy.data.objects:
             if obj not in existing_objects:
                 new_objects.append(obj)
                 existing_objects.append(obj)
 
-        print(f"New objects: {new_objects}")
+        # print(f"New objects: {new_objects}")
 
         for obj in new_objects:
             print(f"Imported object: {i}  {obj.name}")
@@ -559,10 +601,14 @@ def main(input_md: str):
     backdrop.scale.y = backdrop_height
     backdrop.scale.z = backdrop_height
     backdrop.location.x = (backdrop_width / 2) - 0.5
+    # backdrop.location.y = 10
     bpy.ops.object.mode_set(mode="EDIT")
 
     create_material(
-        name="Backdrop", roughness=0.9, alpha=0.630, base_color=(0.8, 0.8, 0.8, 1.0)
+        name="Backdrop",
+        roughness=0.9,
+        alpha=0.630,
+        base_color=(0.417, 0.445, 0.801, 1.0),
     )
     backdrop.data.materials.append(bpy.data.materials["Backdrop"])
 
@@ -573,6 +619,7 @@ def main(input_md: str):
     sun = bpy.context.active_object
     sun.data.energy = 2.6
     sun.name = "Sun"
+    move_to_collection(sun, "Lights")
 
     for area in bpy.context.screen.areas:
         if area.type == "VIEW_3D":
