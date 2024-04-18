@@ -11,7 +11,6 @@ import tempfile
 import markdown
 from .utils.dmgextractor import DMGExtractor
 import fitz  # PyMuPDF
-import commonmark
 from pygments.formatters import HtmlFormatter
 from markdown.extensions.codehilite import CodeHiliteExtension
 import math
@@ -307,7 +306,7 @@ def move_to_collection(obj, collection_name):
 
 
 def import_and_position_images(
-    slide_images, offset_x=2.0, offset_y=-0.05, offset_z=2.8, text_plane_width=2
+    slide_images, offset_x=2.0, offset_y=0.15, offset_z=2.8, text_plane_width=2
 ):
     print(f"Importing images: {slide_images}")
     print(f"processing {len(slide_images)} images")
@@ -448,7 +447,7 @@ def convert_to_svgs(md_sections, base_dir):
 def create_material(
     name="Slides",
     roughness=0.9,
-    alpha=0.630,
+    alpha=1.0,
     base_color=(0.8, 0.8, 0.8, 1.0),
     transmission=0.0,
 ):
@@ -515,16 +514,26 @@ def import_and_transform_svgs(svg_files, offset_x=3):
                 obj.scale = (10, 10, 10)
                 obj.location.x = (i * offset_x) - 0.9
                 obj.location.z = obj.location.z + 0.15
-                obj.location.y = obj.location.y - 0.05
+                obj.location.y = obj.location.y - 0.015
                 obj.modifiers["Solidify"].thickness = 0.0010
             else:
                 obj.location.x = i * offset_x
                 obj.modifiers["Solidify"].thickness = 0.02
-
+            original_camera_y_location = bpy.context.scene.camera.location.y
             # insert keyframe in camera for location
-            bpy.context.scene.frame_set(i + 1)
+            target_frame = (i * 30) + 1
+
+            bpy.context.scene.camera.location.y = original_camera_y_location - 2
+            bpy.context.scene.camera.keyframe_insert(
+                data_path="location", index=1, frame=target_frame - 15
+            )
+
             bpy.context.scene.camera.location.x = offset_x * i
-            bpy.context.scene.camera.keyframe_insert(data_path="location", index=-1)
+            bpy.context.scene.camera.location.y = original_camera_y_location
+
+            bpy.context.scene.camera.keyframe_insert(
+                data_path="location", frame=target_frame
+            )
 
 
 def save_blend_file(filename):
@@ -568,7 +577,7 @@ def main(input_md: str):
     # add camera
     bpy.ops.object.camera_add()
     bpy.context.scene.camera = bpy.data.objects["Camera"]
-    bpy.context.scene.camera.location = (0, -6.5, 3)
+    bpy.context.scene.camera.location = (0, -4.5, 3)
     bpy.context.scene.camera.rotation_euler = (1.5708, 0, 0)
 
     import_and_transform_svgs(svg_files)
@@ -598,16 +607,16 @@ def main(input_md: str):
     backdrop_height = 10
 
     backdrop.scale.x = backdrop_width
-    backdrop.scale.y = backdrop_height
+    backdrop.scale.y = backdrop_height * 2
     backdrop.scale.z = backdrop_height
     backdrop.location.x = (backdrop_width / 2) - 0.5
-    # backdrop.location.y = 10
+    backdrop.location.y = 10
     bpy.ops.object.mode_set(mode="EDIT")
 
     create_material(
         name="Backdrop",
         roughness=0.9,
-        alpha=0.630,
+        alpha=1.0,
         base_color=(0.417, 0.445, 0.801, 1.0),
     )
     backdrop.data.materials.append(bpy.data.materials["Backdrop"])
@@ -636,13 +645,29 @@ def main(input_md: str):
                         (math.radians(90), math.radians(0), math.radians(0)), "XYZ"
                     ).to_quaternion()
                     space.region_3d.view_location = Vector((0, -2, 3))
-                    area.spaces[0].shading.type = "MATERIAL"
+                    this_space = area.spaces[0]
+                    this_space.shading.type = "MATERIAL"
                     print(f"setting shading to  {area.spaces[0].shading.type}")
+                    this_space.overlay.show_overlays = False
+                    this_space.show_region_tool_header = False
+                    this_space.show_region_toolbar = False
+                    this_space.show_region_hud = False
+                    this_space.show_viewer = False
+                    this_space.show_viewer = True
+                    this_space.show_gizmo = False
 
                     zoom_level = 2.0  # Example zoom level
 
                     # Set the zoom level
                     space.region_3d.view_distance = zoom_level
+
+    # set renderer to cycles
+    bpy.context.scene.render.engine = "CYCLES"
+    # set renderer to gpu
+    bpy.context.scene.cycles.device = "GPU"
+    # set viewport max samples
+    bpy.context.scene.cycles.preview_samples = 32
+    bpy.context.scene.cycles.use_preview_denoising
 
     save_blend_file(input_md_file.stem + ".blend")
 
