@@ -71,7 +71,7 @@
 ### Homeworks
 - Weeks 2, 4, 6 (assigned and due following week) 33%
 - Week 10 (midterm presentation) 31%
-- Week 16 (final project presentation) 31%
+- Week 15 (final project presentation) 31%
 - Class Participation 5%
 
 
